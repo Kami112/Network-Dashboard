@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetPulse Network Monitor</title>
+<meta name="description" content="Interactive 3D network monitoring dashboard built with Three.js. All traffic is randomly generated for demo purposes.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>">
+<style>
+  :root {
+    --bg: #070b14;
+    --panel: #0d1424;
+    --panel-2: #111b30;
+    --border: #1d2a44;
+    --text: #d8e3f5;
+    --muted: #7f8fab;
+    --accent: #38bdf8;
+    --ok: #22c55e;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+    --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--font);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  button, input { font: inherit; color: inherit; }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0b1324, var(--bg));
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: .2px; }
+  .brand-mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    display: grid; place-items: center;
+    background: radial-gradient(circle at 30% 30%, #7dd3fc, #0369a1);
+    box-shadow: 0 0 18px rgba(56, 189, 248, .45);
+    font-size: 15px;
+  }
+  .badge {
+    font: 600 11px/1 var(--mono);
+    text-transform: uppercase; letter-spacing: .8px;
+    padding: 5px 8px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--muted);
+  }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .live-pill { display: inline-flex; align-items: center; gap: 7px; font: 600 12px var(--mono); color: var(--ok); }
+  .live-pill .pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.4s infinite; }
+  .live-pill.paused { color: var(--warn); }
+  .live-pill.paused .pulse { animation: none; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+  #clock { font: 500 13px var(--mono); color: var(--muted); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--panel-2);
+    cursor: pointer; font-weight: 600;
+    transition: border-color .15s, background .15s;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:focus-visible, .chip:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.primary[aria-pressed="true"] { border-color: var(--warn); color: var(--warn); }
+  kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); }
+
+  /* ---------- Layout ---------- */
+  main {
+    flex: 1 1 0;
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr) 340px;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+    min-height: 0;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 16px;
+    min-height: 0; overflow: auto;
+  }
+  .panel h2 {
+    margin: 0 0 8px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--muted);
+  }
+  #stage { position: relative; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; min-height: 0; background: var(--bg); }
+  #stage canvas { display: block; }
+  .stage-hint {
+    position: absolute; left: 12px; bottom: 12px; z-index: 2;
+    font: 12px var(--mono); color: var(--muted);
+    background: rgba(7, 11, 20, .75); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 8px; pointer-events: none;
+  }
+  .legend { position: absolute; right: 12px; top: 12px; z-index: 2; display: flex; gap: 10px; font: 12px var(--mono);
+    background: rgba(7, 11, 20, .75); border: 1px solid var(--border); padding: 6px 10px; border-radius: 8px; pointer-events: none; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--c, var(--muted)); box-shadow: 0 0 8px var(--c, transparent); }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font: 13px var(--mono); z-index: 3; text-align: center; padding: 16px; }
+
+  /* ---------- Left panel ---------- */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .tile .label { font-size: 11px; color: var(--muted); }
+  .tile .value { font: 700 20px/1.2 var(--mono); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tile .unit { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 3px; }
+  .class-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 10px; margin-bottom: 10px; }
+  .class-row .name { display: flex; align-items: center; gap: 8px; }
+  .class-row .count { font: 600 13px var(--mono); font-variant-numeric: tabular-nums; }
+  .class-row .pct { font: 12px var(--mono); color: var(--muted); width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+  .meter { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+  .meter > div { height: 100%; width: 0; background: var(--c); border-radius: 3px; transition: width .3s; }
+  .chart-wrap { position: relative; height: 170px; }
+  #chart { width: 100%; height: 100%; display: block; }
+  .chart-caption { font-size: 11px; color: var(--muted); margin-top: 6px; display: flex; justify-content: space-between; }
+  .note { font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto; }
+
+  /* ---------- Right panel ---------- */
+  #details { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  #details .empty { color: var(--muted); font-size: 13px; }
+  .details-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .details-head h3 { margin: 0; font-size: 16px; }
+  .details-head .type { font-size: 12px; color: var(--muted); }
+  .icon-btn { border: 1px solid var(--border); background: transparent; border-radius: 6px; width: 26px; height: 26px; cursor: pointer; color: var(--muted); }
+  .icon-btn:hover { color: var(--text); border-color: var(--accent); }
+  .status { display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--mono); color: var(--c); }
+  dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 0; font-size: 12.5px; }
+  dl.kv dt { color: var(--muted); }
+  dl.kv dd { margin: 0; font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .mini-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin: 12px 0 6px; }
+  .mini-log { list-style: none; margin: 0; padding: 0; font: 11.5px var(--mono); }
+  .mini-log li { display: flex; align-items: center; gap: 6px; padding: 2px 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .log-section { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .log-head { display: flex; align-items: center; justify-content: space-between; }
+  .search { position: relative; margin-bottom: 8px; }
+  .search input {
+    width: 100%; padding: 8px 10px 8px 32px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--panel-2);
+  }
+  .search input::placeholder { color: var(--muted); }
+  .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .chip {
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+    background: transparent; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
+  }
+  .chip[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: rgba(56, 189, 248, .1); }
+  #logCount { font: 11px var(--mono); color: var(--muted); }
+  #log { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 160px; border-top: 1px solid var(--border); }
+  #log li {
+    display: grid; grid-template-columns: auto auto 1fr; gap: 2px 8px; align-items: center;
+    padding: 7px 4px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12.5px;
+  }
+  #log li:hover { background: var(--panel-2); }
+  #log .t { font: 11px var(--mono); color: var(--muted); }
+  #log .route { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log .meta { grid-column: 3; font: 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log .tag { grid-column: 3; font: 600 11px var(--mono); color: var(--c); }
+  #log .empty { display: block; color: var(--muted); cursor: default; padding: 16px 4px; }
+
+  /* ---------- 3D labels ---------- */
+  .node-label {
+    font: 600 11px var(--mono);
+    padding: 3px 9px; border-radius: 999px;
+    border: 1px solid rgba(56, 189, 248, .5);
+    background: rgba(7, 11, 20, .82);
+    color: #e0f2fe; white-space: nowrap;
+    cursor: pointer; pointer-events: auto; user-select: none;
+    transition: border-color .2s, color .2s;
+  }
+  .node-label:hover, .node-label.selected { border-color: #fff; }
+  .node-label.alert { border-color: var(--bad); color: #fecaca; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 1180px), (max-height: 620px) {
+    body { height: auto; }
+    .panel { overflow: visible; }
+    main { flex: none; grid-template-columns: 280px minmax(0, 1fr); grid-template-rows: minmax(440px, 1fr) auto; height: auto; }
+    #stage { grid-column: 2; grid-row: 1; }
+    #leftPanel { grid-column: 1; grid-row: 1; }
+    #rightPanel { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+    #log { max-height: 380px; }
+  }
+  @media (max-width: 760px) {
+    header { padding: 12px 16px; }
+    .header-right { margin-left: 0; width: 100%; justify-content: space-between; }
+    main { display: flex; flex-direction: column; padding: 12px 16px 16px; }
+    #stage { height: 58vh; min-height: 340px; order: -1; flex: none; }
+    .panel { overflow: visible; }
+    #rightPanel { display: flex; }
+    .legend { top: 8px; right: 8px; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="brand-mark" aria-hidden="true">⌁</span> NetPulse</div>
+  <span class="badge">Simulated data</span>
+  <div class="header-right">
+    <span id="livePill" class="live-pill"><span class="pulse"></span><span id="liveText">LIVE</span></span>
+    <span id="clock">--:--:--</span>
+    <button id="pauseBtn" class="btn primary" aria-pressed="false" title="Pause / resume (Space)">
+      <svg id="pauseIcon" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="2" y="1" width="3.5" height="12" rx="1"/><rect x="8.5" y="1" width="3.5" height="12" rx="1"/></svg>
+      <span id="pauseLabel">Pause</span> <kbd>Space</kbd>
+    </button>
+  </div>
+</header>
+
+<main>
+  <aside id="leftPanel" class="panel" aria-label="Traffic statistics">
+    <section>
+      <h2>Live traffic</h2>
+      <div class="tiles">
+        <div class="tile"><div class="label">Total packets</div><div class="value" id="statTotal">0</div></div>
+        <div class="tile"><div class="label">Rate</div><div class="value"><span id="statRate">0</span><span class="unit">pkt/s</span></div></div>
+        <div class="tile"><div class="label">Throughput</div><div class="value"><span id="statThroughput">0.0</span><span class="unit">Mbps</span></div></div>
+        <div class="tile"><div class="label">In flight</div><div class="value" id="statFlight">0</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Classification</h2>
+      <div id="classRows"></div>
+    </section>
+
+    <section>
+      <h2>Packets per second</h2>
+      <div class="chart-wrap"><canvas id="chart" role="img" aria-label="Stacked bar chart of packets per second by classification over the last 30 seconds"></canvas></div>
+      <div class="chart-caption"><span>−30 s</span><span>now</span></div>
+    </section>
+
+    <p class="note">Demo only: every device, address and packet here is randomly generated in your browser. Nothing is captured from a real network.</p>
+  </aside>
+
+  <div id="stage">
+    <div id="loading">Loading 3D scene…</div>
+    <div class="legend" aria-hidden="true">
+      <span><i class="dot" style="--c: var(--ok)"></i>Normal</span>
+      <span><i class="dot" style="--c: var(--warn)"></i>Suspicious</span>
+      <span><i class="dot" style="--c: var(--bad)"></i>Malicious</span>
+    </div>
+    <div class="stage-hint">Drag to orbit · scroll to zoom · click a node</div>
+  </div>
+
+  <aside id="rightPanel" class="panel" aria-label="Node details and live log">
+    <section>
+      <h2>Node details</h2>
+      <div id="details" aria-live="polite"></div>
+    </section>
+
+    <section class="log-section">
+      <div class="log-head"><h2>Live log</h2><span id="logCount"></span></div>
+      <label class="search">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+        <input id="search" type="search" placeholder="Search IP, node, protocol, threat…" aria-label="Search log" autocomplete="off">
+      </label>
+      <div class="chips" role="group" aria-label="Filter by classification">
+        <button class="chip" data-filter="all" aria-pressed="true">All</button>
+        <button class="chip" data-filter="normal" aria-pressed="false"><i class="dot" style="--c: var(--ok)"></i>Normal</button>
+        <button class="chip" data-filter="suspicious" aria-pressed="false"><i class="dot" style="--c: var(--warn)"></i>Suspicious</button>
+        <button class="chip" data-filter="malicious" aria-pressed="false"><i class="dot" style="--c: var(--bad)"></i>Malicious</button>
+      </div>
+      <ul id="log"></ul>
+    </section>
+  </aside>
+</main>
+
+<script>
+  // If the Three.js module can't be fetched from the CDN, say so instead of spinning forever.
+  setTimeout(function () {
+    var el = document.getElementById('loading');
+    if (el) el.textContent = 'Could not load Three.js from the CDN. Check your connection and reload.';
+  }, 10000);
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+/* =========================================================
+   Configuration
+   ========================================================= */
+const CLASSES = {
+  normal:     { label: 'Normal',     color: 0x22c55e, cssVar: '--ok' },
+  suspicious: { label: 'Suspicious', color: 0xf59e0b, cssVar: '--warn' },
+  malicious:  { label: 'Malicious',  color: 0xef4444, cssVar: '--bad' },
+};
+const CLASS_KEYS = Object.keys(CLASSES);
+
+const NODE_DEFS = [
+  { id: 'internet', name: 'Internet', type: 'WAN Gateway',        ip: '203.0.113.1', os: 'Edge router',       pos: [0, 1.5, -11] },
+  { id: 'server',   name: 'Server',   type: 'Application Server', ip: '10.0.0.10',   os: 'Ubuntu 24.04 LTS',  pos: [0, 0, 0] },
+  { id: 'database', name: 'Database', type: 'PostgreSQL Cluster', ip: '10.0.0.20',   os: 'Debian 12',         pos: [9, 0, -4] },
+  { id: 'desktop',  name: 'Desktop',  type: 'Workstation',        ip: '10.0.1.31',   os: 'Windows 11 Pro',    pos: [-9, 0, -3] },
+  { id: 'laptop',   name: 'Laptop',   type: 'Endpoint',           ip: '10.0.1.42',   os: 'macOS 15',          pos: [-6, 0, 7] },
+  { id: 'mobile',   name: 'Mobile',   type: 'Mobile Device',      ip: '10.0.2.57',   os: 'Android 15',        pos: [6, 0, 8] },
+];
+
+const LINK_DEFS = [
+  ['internet', 'server'], ['server', 'database'], ['server', 'desktop'],
+  ['server', 'laptop'], ['server', 'mobile'], ['internet', 'mobile'], ['desktop', 'laptop'],
+];
+
+const PROTOCOLS = [
+  ['HTTPS', 443, 40], ['HTTP', 80, 10], ['DNS', 53, 12], ['SSH', 22, 6],
+  ['SMB', 445, 5], ['RDP', 3389, 4], ['MQTT', 1883, 4], ['NTP', 123, 3],
+];
+const REASONS = {
+  normal: [''],
+  suspicious: ['Unusual destination port', 'Payload size anomaly', 'Off-hours access', 'Repeated failed auth', 'Unrecognised user agent', 'High connection rate'],
+  malicious: ['Port scan signature', 'SQL injection pattern', 'SSH brute-force', 'Known-bad IP reputation', 'Malware C2 beacon', 'Data exfiltration pattern'],
+};
+
+const MAX_IN_FLIGHT = 260;
+const MAX_LOGS = 400;
+const MAX_LOG_DOM = 150;
+const HISTORY_SECONDS = 30;
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+const $ = (s) => document.querySelector(s);
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+function weighted(entries) {
+  let r = Math.random() * entries.reduce((s, e) => s + e[e.length - 1], 0);
+  for (const e of entries) { if ((r -= e[e.length - 1]) <= 0) return e; }
+  return entries[entries.length - 1];
+}
+function fmtBytes(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 ** 2) return `${(b / 1024).toFixed(1)} KB`;
+  if (b < 1024 ** 3) return `${(b / 1024 ** 2).toFixed(1)} MB`;
+  return `${(b / 1024 ** 3).toFixed(2)} GB`;
+}
+function fmtDuration(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return d ? `${d}d ${h}h ${m}m` : `${h}h ${m}m ${Math.floor(sec % 60)}s`;
+}
+const fmtTime = (d) => d.toLocaleTimeString([], { hour12: false });
+const randomMac = () => Array.from({ length: 6 }, () => randInt(0, 255).toString(16).padStart(2, '0')).join(':');
+const externalIp = () => `${pick(['198.51.100', '203.0.113', '192.0.2'])}.${randInt(2, 254)}`;
+const css = getComputedStyle(document.documentElement);
+const cssColor = (v) => css.getPropertyValue(v).trim();
+
+/* =========================================================
+   Scene
+   ========================================================= */
+const stage = $('#stage');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+} catch (err) {
+  $('#loading').textContent = 'WebGL is not available in this browser, so the 3D view cannot be shown.';
+  throw err;
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+stage.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+Object.assign(labelRenderer.domElement.style, { position: 'absolute', top: '0', left: '0', pointerEvents: 'none' });
+stage.appendChild(labelRenderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070b14);
+scene.fog = new THREE.Fog(0x070b14, 30, 70);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+camera.position.set(14, 15, 20);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.5, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 10;
+controls.maxDistance = 55;
+controls.maxPolarAngle = Math.PI * 0.47;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.35;
+controls.addEventListener('start', () => { controls.autoRotate = false; });
+
+scene.add(new THREE.AmbientLight(0x8aa4cc, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(10, 20, 10);
+scene.add(sun);
+const coreLight = new THREE.PointLight(0x38bdf8, 40, 30);
+coreLight.position.set(0, 4, 0);
+scene.add(coreLight);
+
+const grid = new THREE.GridHelper(60, 60, 0x1e3a5f, 0x0f1f37);
+grid.material.transparent = true;
+grid.material.opacity = 0.8;
+scene.add(grid);
+
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(30, 64),
+  new THREE.MeshBasicMaterial({ color: 0x0a1222, transparent: true, opacity: 0.6 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.01;
+scene.add(floor);
+
+/* ---------- Nodes ---------- */
+const BASE_EMISSIVE = new THREE.Color(0x38bdf8);
+const ALERT_EMISSIVE = new THREE.Color(0xef4444);
+const WARN_EMISSIVE = new THREE.Color(0xf59e0b);
+
+function makeGeometry(id) {
+  switch (id) {
+    case 'internet': return new THREE.IcosahedronGeometry(1.5, 1);
+    case 'server':   return new THREE.BoxGeometry(1.5, 2.6, 1.5);
+    case 'database': return new THREE.CylinderGeometry(1.1, 1.1, 2, 32, 3);
+    case 'desktop':  return new THREE.BoxGeometry(2.4, 1.5, 0.3);
+    case 'laptop':   return new THREE.BoxGeometry(2.1, 0.25, 1.5);
+    default:         return new THREE.BoxGeometry(0.8, 1.5, 0.18);
+  }
+}
+
+const nodes = new Map();
+const nodeMeshes = [];
+
+for (const def of NODE_DEFS) {
+  const group = new THREE.Group();
+  group.position.set(...def.pos);
+
+  const geo = makeGeometry(def.id);
+  geo.computeBoundingBox();
+  const height = geo.boundingBox.max.y - geo.boundingBox.min.y;
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x0f2238, emissive: BASE_EMISSIVE.clone(), emissiveIntensity: 0.35,
+    metalness: 0.4, roughness: 0.35, transparent: def.id === 'internet', opacity: def.id === 'internet' ? 0.85 : 1,
+  });
+  const mesh = new THREE.Mesh(geo, material);
+  const baseY = height / 2 + 0.6;
+  mesh.position.y = baseY;
+  mesh.userData.id = def.id;
+  mesh.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo, 20),
+    new THREE.LineBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.85 })
+  ));
+  group.add(mesh);
+  nodeMeshes.push(mesh);
+
+  const padMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+  const pad = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.7, 48), padMat);
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.y = 0.02;
+  group.add(pad);
+
+  const selRing = new THREE.Mesh(
+    new THREE.RingGeometry(2.0, 2.12, 64),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+  );
+  selRing.rotation.x = -Math.PI / 2;
+  selRing.position.y = 0.03;
+  selRing.visible = false;
+  group.add(selRing);
+
+  const labelEl = document.createElement('div');
+  labelEl.className = 'node-label';
+  labelEl.textContent = def.name;
+  labelEl.addEventListener('click', (e) => { e.stopPropagation(); selectNode(def.id); });
+  const label = new CSS2DObject(labelEl);
+  label.position.set(0, height + 1.4, 0);
+  group.add(label);
+
+  scene.add(group);
+
+  nodes.set(def.id, {
+    ...def,
+    group, mesh, material, pad, padMat, selRing, labelEl, baseY,
+    phase: Math.random() * Math.PI * 2,
+    anchor: new THREE.Vector3(def.pos[0], def.pos[1] + baseY, def.pos[2]),
+    mac: def.id === 'internet' ? '—' : randomMac(),
+    uptimeBase: randInt(3600 * 6, 86400 * 40),
+    alert: 0, alertColor: ALERT_EMISSIVE,
+    lastSuspicious: -Infinity, lastMalicious: -Infinity,
+    stats: { pktIn: 0, pktOut: 0, bytesIn: 0, bytesOut: 0, suspicious: 0, malicious: 0 },
+    links: [],
+  });
+}
+
+/* ---------- Links ---------- */
+const links = LINK_DEFS.map(([a, b]) => {
+  const A = nodes.get(a), B = nodes.get(b);
+  const mid = A.anchor.clone().add(B.anchor).multiplyScalar(0.5);
+  mid.y += A.anchor.distanceTo(B.anchor) * 0.18 + 0.5;
+  const curve = new THREE.QuadraticBezierCurve3(A.anchor.clone(), mid, B.anchor.clone());
+  const material = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.35 });
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(48)), material);
+  scene.add(line);
+  const link = { a, b, curve, material, length: curve.getLength() };
+  A.links.push(link); B.links.push(link);
+  return link;
+});
+const uplink = links.find((l) => l.a === 'internet' && l.b === 'server');
+
+/* ---------- Packets ---------- */
+const packetGeo = new THREE.SphereGeometry(0.17, 12, 12);
+const glowGeo = new THREE.SphereGeometry(0.38, 12, 12);
+const packetMats = {}, glowMats = {};
+for (const k of CLASS_KEYS) {
+  packetMats[k] = new THREE.MeshBasicMaterial({ color: CLASSES[k].color });
+  glowMats[k] = new THREE.MeshBasicMaterial({ color: CLASSES[k].color, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
+}
+const pool = [];
+const packets = [];
+
+function acquirePacketMesh(cls) {
+  let m = pool.pop();
+  if (!m) {
+    m = new THREE.Mesh(packetGeo, packetMats[cls]);
+    m.add(new THREE.Mesh(glowGeo, glowMats[cls]));
+  }
+  m.material = packetMats[cls];
+  m.children[0].material = glowMats[cls];
+  m.visible = true;
+  scene.add(m);
+  return m;
+}
+function releasePacketMesh(m) {
+  scene.remove(m);
+  pool.push(m);
+}
+
+/* =========================================================
+   Simulation state
+   ========================================================= */
+let paused = false;
+let simTime = 0;
+let spawnAcc = 0;
+let nextBurst = rand(18, 30);
+let burstUntil = -1;
+
+const totals = { packets: 0, bytes: 0, normal: 0, suspicious: 0, malicious: 0 };
+const newBucket = () => ({ normal: 0, suspicious: 0, malicious: 0, bytes: 0 });
+const history = Array.from({ length: HISTORY_SECONDS - 1 }, newBucket);
+let current = newBucket();
+let bucketClock = 0;
+let lastBucket = newBucket();
+
+const logs = [];
+let logSeq = 0;
+
+function classify(srcId, inBurst) {
+  if (inBurst) return weighted([['malicious', 65], ['suspicious', 25], ['normal', 10]])[0];
+  if (srcId === 'internet') return weighted([['normal', 72], ['suspicious', 19], ['malicious', 9]])[0];
+  return weighted([['normal', 89], ['suspicious', 8], ['malicious', 3]])[0];
+}
+
+function spawnPacket() {
+  if (packets.length >= MAX_IN_FLIGHT) return;
+  const inBurst = simTime < burstUntil && Math.random() < 0.7;
+  const link = inBurst ? uplink : pick(links);
+  const forward = inBurst ? true : Math.random() < 0.5;
+  const src = forward ? link.a : link.b;
+  const dst = forward ? link.b : link.a;
+  const cls = classify(src, inBurst);
+
+  let [proto, port] = weighted(PROTOCOLS);
+  if (link.a === 'server' && link.b === 'database' && Math.random() < 0.85) [proto, port] = ['PostgreSQL', 5432];
+  if (inBurst) [proto, port] = [pick(['TCP', 'SSH', 'HTTP']), pick([22, 23, 80, 445, 3389, 8080])];
+
+  // Each visual packet stands in for a sampled flow, so sizes are flow-sized.
+  const bytes = Math.round(Math.exp(rand(Math.log(600), Math.log(1.6e6))));
+  let reason = pick(REASONS[cls]);
+  if (inBurst && cls === 'malicious') reason = 'Port scan signature';
+
+  const srcNode = nodes.get(src), dstNode = nodes.get(dst);
+  const srcIp = src === 'internet' ? externalIp() : srcNode.ip;
+  const dstIp = dst === 'internet' ? externalIp() : dstNode.ip;
+
+  // Stats
+  totals.packets++; totals.bytes += bytes; totals[cls]++;
+  current[cls]++; current.bytes += bytes;
+  srcNode.stats.pktOut++; srcNode.stats.bytesOut += bytes;
+  dstNode.stats.pktIn++; dstNode.stats.bytesIn += bytes;
+  if (cls !== 'normal') {
+    dstNode.stats[cls]++;
+    if (cls === 'malicious') dstNode.lastMalicious = simTime; else dstNode.lastSuspicious = simTime;
+  }
+
+  // Visual
+  const mesh = acquirePacketMesh(cls);
+  const speed = rand(6, 10) / link.length;
+  packets.push({ mesh, link, t: forward ? 0 : 1, dir: forward ? 1 : -1, speed, cls, dst });
+  mesh.position.copy(link.curve.getPoint(forward ? 0 : 1));
+
+  addLog({
+    id: ++logSeq, time: new Date(), cls, src, dst, srcIp, dstIp, proto, port, bytes, reason,
+  });
+}
+
+function updatePackets(dt) {
+  for (let i = packets.length - 1; i >= 0; i--) {
+    const p = packets[i];
+    p.t += p.speed * p.dir * dt;
+    if (p.t >= 1 || p.t <= 0) {
+      const dst = nodes.get(p.dst);
+      if (p.cls === 'malicious') { dst.alert = 1; dst.alertColor = ALERT_EMISSIVE; }
+      else if (p.cls === 'suspicious' && dst.alert < 0.5) { dst.alert = 0.6; dst.alertColor = WARN_EMISSIVE; }
+      releasePacketMesh(p.mesh);
+      packets.splice(i, 1);
+      continue;
+    }
+    p.link.curve.getPoint(p.t, p.mesh.position);
+  }
+}
+
+function nodeStatus(n) {
+  if (simTime - n.lastMalicious < 8) return { text: 'Under attack', cssVar: '--bad' };
+  if (simTime - n.lastSuspicious < 8) return { text: 'Warning', cssVar: '--warn' };
+  return { text: 'Healthy', cssVar: '--ok' };
+}
+
+/* =========================================================
+   Selection & picking
+   ========================================================= */
+let selectedId = null;
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+
+function pickNode(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(nodeMeshes, false)[0];
+  return hit ? hit.object.userData.id : null;
+}
+
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt) return;
+  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+  downAt = null;
+  if (moved < 6) selectNode(pickNode(e));
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (e.buttons) return;
+  renderer.domElement.style.cursor = pickNode(e) ? 'pointer' : 'grab';
+});
+
+function selectNode(id) {
+  selectedId = id;
+  for (const n of nodes.values()) {
+    n.selRing.visible = n.id === id;
+    n.labelEl.classList.toggle('selected', n.id === id);
+  }
+  for (const l of links) {
+    const active = !id || l.a === id || l.b === id;
+    l.material.opacity = !id ? 0.35 : active ? 0.9 : 0.1;
+    l.material.color.set(id && active ? 0xbae6fd : 0x38bdf8);
+  }
+  renderDetails();
+}
+
+/* =========================================================
+   UI: stats, chart, log, details
+   ========================================================= */
+const el = {
+  total: $('#statTotal'), rate: $('#statRate'), throughput: $('#statThroughput'), flight: $('#statFlight'),
+  classRows: $('#classRows'), chart: $('#chart'), log: $('#log'), logCount: $('#logCount'),
+  search: $('#search'), details: $('#details'), clock: $('#clock'),
+  pauseBtn: $('#pauseBtn'), pauseLabel: $('#pauseLabel'), pauseIcon: $('#pauseIcon'),
+  livePill: $('#livePill'), liveText: $('#liveText'),
+};
+
+el.classRows.innerHTML = CLASS_KEYS.map((k) => `
+  <div class="class-row" style="--c: var(${CLASSES[k].cssVar})">
+    <span class="name"><i class="dot"></i>${CLASSES[k].label}</span>
+    <span class="count" id="cnt-${k}">0</span>
+    <span class="pct" id="pct-${k}">0.0%</span>
+    <div class="meter"><div id="bar-${k}"></div></div>
+  </div>`).join('');
+
+function updateStats() {
+  el.total.textContent = totals.packets.toLocaleString();
+  const lastTotal = lastBucket.normal + lastBucket.suspicious + lastBucket.malicious;
+  el.rate.textContent = lastTotal;
+  el.throughput.textContent = (lastBucket.bytes * 8 / 1e6).toFixed(1);
+  el.flight.textContent = packets.length;
+  for (const k of CLASS_KEYS) {
+    const pct = totals.packets ? (totals[k] / totals.packets) * 100 : 0;
+    $(`#cnt-${k}`).textContent = totals[k].toLocaleString();
+    $(`#pct-${k}`).textContent = `${pct.toFixed(1)}%`;
+    $(`#bar-${k}`).style.width = `${pct}%`;
+  }
+}
+
+const chartColors = Object.fromEntries(CLASS_KEYS.map((k) => [k, cssColor(CLASSES[k].cssVar)]));
+const niceMax = (v) => { const p = 10 ** Math.floor(Math.log10(v)); const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; };
+
+function drawChart() {
+  const c = el.chart, dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const ctx = c.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const data = [...history, current];
+  const sum = (b) => b.normal + b.suspicious + b.malicious;
+  const max = niceMax(Math.max(10, ...data.map(sum)));
+  const left = 28, top = 6, bottom = 4;
+  const pw = w - left, ph = h - top - bottom;
+
+  ctx.font = '10px ui-monospace, Menlo, monospace';
+  ctx.fillStyle = cssColor('--muted');
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.strokeStyle = cssColor('--border');
+  ctx.lineWidth = 1;
+  for (const f of [0, 0.5, 1]) {
+    const y = Math.round(top + ph * (1 - f)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.fillText(String(Math.round(max * f)), left - 6, y);
+  }
+
+  const slot = pw / data.length;
+  const bw = Math.max(2, slot - 2);
+  data.forEach((b, i) => {
+    let y = top + ph;
+    const x = left + i * slot + (slot - bw) / 2;
+    ctx.globalAlpha = i === data.length - 1 ? 0.45 : 1; // in-progress second
+    for (const k of CLASS_KEYS) {
+      if (!b[k]) continue;
+      const bh = (b[k] / max) * ph;
+      ctx.fillStyle = chartColors[k];
+      ctx.fillRect(x, y - bh, bw, bh);
+      y -= bh + (bh > 2 ? 1 : 0); // 1px gap between segments
+    }
+  });
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- Log ---------- */
+let filter = 'all';
+let query = '';
+const nodeName = (id) => nodes.get(id).name;
+
+function addLog(entry) {
+  entry.text = [
+    nodeName(entry.src), nodeName(entry.dst), entry.srcIp, entry.dstIp, entry.proto,
+    String(entry.port), CLASSES[entry.cls].label, entry.reason, fmtTime(entry.time),
+  ].join(' ').toLowerCase();
+  logs.unshift(entry);
+  if (logs.length > MAX_LOGS) logs.pop();
+
+  if (matches(entry)) {
+    const empty = el.log.querySelector('.empty');
+    if (empty) empty.remove();
+    el.log.prepend(logItem(entry));
+    while (el.log.children.length > MAX_LOG_DOM) el.log.lastElementChild.remove();
+  }
+}
+
+function matches(e) {
+  return (filter === 'all' || e.cls === filter) && (!query || e.text.includes(query));
+}
+
+function logItem(e) {
+  const li = document.createElement('li');
+  li.dataset.node = e.dst;
+  li.style.setProperty('--c', `var(${CLASSES[e.cls].cssVar})`);
+  li.title = `${e.srcIp} → ${e.dstIp}`;
+  li.innerHTML = `
+    <span class="t">${fmtTime(e.time)}</span>
+    <i class="dot"></i>
+    <span class="route">${nodeName(e.src)} → ${nodeName(e.dst)}</span>
+    <span class="meta">${e.srcIp} → ${e.dstIp} · ${e.proto}:${e.port} · ${fmtBytes(e.bytes)}</span>
+    ${e.reason ? `<span class="tag">${CLASSES[e.cls].label}: ${e.reason}</span>` : ''}`;
+  return li;
+}
+
+function renderLog() {
+  const items = logs.filter(matches).slice(0, MAX_LOG_DOM);
+  el.log.replaceChildren(...items.map(logItem));
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = logs.length ? 'No log entries match this search.' : 'Waiting for traffic…';
+    el.log.append(li);
+  }
+}
+
+function updateLogCount() {
+  const n = (filter === 'all' && !query) ? logs.length : logs.filter(matches).length;
+  el.logCount.textContent = `${n} of ${logs.length}`;
+}
+
+el.search.addEventListener('input', () => { query = el.search.value.trim().toLowerCase(); renderLog(); updateLogCount(); });
+document.querySelectorAll('.chip').forEach((chip) => chip.addEventListener('click', () => {
+  filter = chip.dataset.filter;
+  document.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === chip)));
+  renderLog(); updateLogCount();
+}));
+el.log.addEventListener('click', (e) => {
+  const li = e.target.closest('li[data-node]');
+  if (li) selectNode(li.dataset.node);
+});
+
+/* ---------- Node details ---------- */
+el.details.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) selectNode(null); });
+
+function renderDetails() {
+  if (!selectedId) {
+    el.details.innerHTML = '<p class="empty" style="margin:0">Click a node in the 3D view (or a log entry) to inspect it.</p>';
+    return;
+  }
+  const n = nodes.get(selectedId), s = n.stats, st = nodeStatus(n);
+  const peers = n.links.map((l) => nodeName(l.a === n.id ? l.b : l.a)).join(', ');
+  const recent = logs.filter((e) => e.src === n.id || e.dst === n.id).slice(0, 5);
+  el.details.innerHTML = `
+    <div class="details-head">
+      <div><h3>${n.name}</h3><div class="type">${n.type}</div></div>
+      <button class="icon-btn" data-close aria-label="Close details">✕</button>
+    </div>
+    <span class="status" style="--c: var(${st.cssVar})"><i class="dot"></i>${st.text}</span>
+    <dl class="kv">
+      <dt>IP address</dt><dd>${n.ip}</dd>
+      <dt>MAC</dt><dd>${n.mac}</dd>
+      <dt>System</dt><dd>${n.os}</dd>
+      <dt>Uptime</dt><dd>${fmtDuration(n.uptimeBase + simTime)}</dd>
+      <dt>Links</dt><dd>${peers}</dd>
+      <dt>Packets in / out</dt><dd>${s.pktIn.toLocaleString()} / ${s.pktOut.toLocaleString()}</dd>
+      <dt>Data in / out</dt><dd>${fmtBytes(s.bytesIn)} / ${fmtBytes(s.bytesOut)}</dd>
+      <dt>Suspicious in</dt><dd style="color:var(--warn)">${s.suspicious.toLocaleString()}</dd>
+      <dt>Malicious in</dt><dd style="color:var(--bad)">${s.malicious.toLocaleString()}</dd>
+    </dl>
+    <div class="mini-title">Recent activity</div>
+    <ul class="mini-log">${recent.length ? recent.map((e) => `
+      <li style="--c: var(${CLASSES[e.cls].cssVar})"><i class="dot"></i>${fmtTime(e.time)} ${e.src === n.id ? '→ ' + nodeName(e.dst) : '← ' + nodeName(e.src)} · ${e.proto}</li>`).join('')
+      : '<li>No traffic yet.</li>'}
+    </ul>`;
+}
+
+/* ---------- Pause ---------- */
+function setPaused(p) {
+  paused = p;
+  el.pauseBtn.setAttribute('aria-pressed', String(p));
+  el.pauseLabel.textContent = p ? 'Resume' : 'Pause';
+  el.pauseIcon.innerHTML = p
+    ? '<path d="M3 1.5v11l9-5.5z"/>'
+    : '<rect x="2" y="1" width="3.5" height="12" rx="1"/><rect x="8.5" y="1" width="3.5" height="12" rx="1"/>';
+  el.livePill.classList.toggle('paused', p);
+  el.liveText.textContent = p ? 'PAUSED' : 'LIVE';
+  if (p) controls.autoRotate = false;
+}
+el.pauseBtn.addEventListener('click', () => setPaused(!paused));
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !e.target.closest('input, button, textarea')) { e.preventDefault(); setPaused(!paused); }
+  if (e.key === 'Escape' && selectedId) selectNode(null);
+});
+
+/* =========================================================
+   Resize & main loop
+   ========================================================= */
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h);
+  labelRenderer.setSize(w, h);
+  camera.aspect = w / h;
+  // Narrow (portrait) views need a wider field of view to fit the whole network.
+  camera.fov = w / h < 1 ? 50 + (1 - w / h) * 40 : 50;
+  camera.updateProjectionMatrix();
+  drawChart();
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+const clock = new THREE.Clock();
+let uiAcc = 0, detailsAcc = 0;
+
+function tick() {
+  requestAnimationFrame(tick);
+  const raw = Math.min(clock.getDelta(), 0.1);
+  const dt = paused ? 0 : raw;
+  simTime += dt;
+
+  if (!paused) {
+    // Traffic generation: gently oscillating base rate plus periodic simulated attack bursts.
+    if (simTime >= nextBurst) { burstUntil = simTime + rand(3, 5); nextBurst = simTime + rand(22, 40); }
+    const rate = 9 + 4 * Math.sin(simTime * 0.25) + (simTime < burstUntil ? 18 : 0);
+    spawnAcc += rate * dt * rand(0.4, 1.6);
+    while (spawnAcc >= 1) { spawnPacket(); spawnAcc -= 1; }
+
+    bucketClock += dt;
+    if (bucketClock >= 1) {
+      bucketClock -= 1;
+      history.push(current);
+      if (history.length > HISTORY_SECONDS - 1) history.shift();
+      lastBucket = current;
+      current = newBucket();
+    }
+  }
+
+  updatePackets(dt);
+
+  // Node animation
+  for (const n of nodes.values()) {
+    n.mesh.position.y = n.baseY + Math.sin(simTime * 1.4 + n.phase) * 0.15;
+    if (n.id === 'internet') { n.mesh.rotation.y += dt * 0.4; n.mesh.rotation.x += dt * 0.15; }
+    else n.mesh.rotation.y += dt * 0.15;
+    n.alert = Math.max(0, n.alert - dt * 1.2);
+    n.material.emissive.copy(BASE_EMISSIVE).lerp(n.alertColor, n.alert);
+    n.material.emissiveIntensity = 0.35 + n.alert * 0.6;
+    const st = nodeStatus(n);
+    n.padMat.color.set(st.cssVar === '--bad' ? 0xef4444 : st.cssVar === '--warn' ? 0xf59e0b : 0x38bdf8);
+    n.labelEl.classList.toggle('alert', st.cssVar === '--bad');
+    if (n.selRing.visible) n.selRing.scale.setScalar(1 + Math.sin(performance.now() / 300) * 0.04);
+  }
+
+  uiAcc += raw; detailsAcc += raw;
+  if (uiAcc >= 0.25) {
+    uiAcc = 0;
+    el.clock.textContent = fmtTime(new Date());
+    updateStats(); drawChart(); updateLogCount();
+  }
+  if (detailsAcc >= 0.5) { detailsAcc = 0; if (selectedId && !paused) renderDetails(); }
+
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+$('#loading').remove();
+renderDetails();
+renderLog();
+tick();
+</script>
+</body>
+</html>
